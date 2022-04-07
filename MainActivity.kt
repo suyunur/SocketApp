@@ -3,21 +3,27 @@ package com.example.socketapp
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import android.telephony.PhoneStateListener
-import android.telephony.TelephonyCallback
+import android.telecom.Call
+import android.telecom.CallScreeningService
 import android.telephony.TelephonyManager
 import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.RequiresApi
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import okhttp3.*
 import okio.ByteString
 import java.time.LocalDateTime
 
 
 internal var CALLER_ID: String = ""
+
+internal var prevState: String = ""
 
 class MainActivity : AppCompatActivity() {
 
@@ -32,15 +38,60 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.callerIdText).setOnClickListener {
             start()
         }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (applicationContext.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE)
+                != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(android.Manifest.permission.READ_PHONE_STATE),
+                        1
+                    )
+                }
+            }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (applicationContext.checkSelfPermission(android.Manifest.permission.PROCESS_OUTGOING_CALLS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(android.Manifest.permission.READ_PHONE_STATE),
+                    1
+                )
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (applicationContext.checkSelfPermission(android.Manifest.permission.BIND_SCREENING_SERVICE)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(android.Manifest.permission.READ_PHONE_STATE),
+                    1
+                )
+            }
+        }
+
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALL_LOG)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.READ_PHONE_STATE),
+                1
+            )
+        }
     }
 
     private fun start() {
-        val request = Request.Builder().url("ws://echo.websocket.org").build()
+        val request = Request.Builder().url("wss://websocket-echo.glitch.me").build()
         val listener = WebSocket()
         val ws = client.newWebSocket(request, listener)
 
         client.dispatcher.executorService.shutdown()
     }
+
+
+
 
     inner class WebSocket : WebSocketListener() {
 
@@ -48,8 +99,7 @@ class MainActivity : AppCompatActivity() {
 
         override fun onOpen(webSocket: okhttp3.WebSocket, response: Response) {
             super.onOpen(webSocket, response)
-            webSocket.send("87071312133")
-            Log.d("SEND", "SEND")
+            webSocket.send("87475605287")
             webSocket.close(status, "CLOSE")
         }
 
@@ -57,7 +107,6 @@ class MainActivity : AppCompatActivity() {
             super.onMessage(webSocket, text)
 
             findViewById<TextView>(R.id.callerIdText).text = text
-            Toast.makeText(this@MainActivity, "Номер с вэб сокета: $text", Toast.LENGTH_SHORT).show()
             CALLER_ID = text
         }
 
@@ -79,52 +128,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     class CallReceiver : BroadcastReceiver() {
-        var prev_state: Int? = null
 
-        override fun onReceive(p0: Context?, p1: Intent?) {
-            val tm: TelephonyManager = p0?.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                tm.registerTelephonyCallback(
-                    p0.mainExecutor,
-                    object : TelephonyCallback(), TelephonyCallback.CallStateListener {
-                        override fun onCallStateChanged(state: Int) {
-                            when (state) {
-                                TelephonyManager.CALL_STATE_RINGING -> {
+        @RequiresApi(Build.VERSION_CODES.O)
+        override fun onReceive(ctx: Context?, intent: Intent?) {
 
-                                    val number = p1?.extras?.getString("incoming_number")
-                                    Toast.makeText(p0, "Номер: $number", Toast.LENGTH_SHORT).show()
-                                    Toast.makeText(p0, "Звонок пришел: ${LocalDateTime.now()}", Toast.LENGTH_SHORT).show()
+            when {
+                intent?.getStringExtra(TelephonyManager.EXTRA_STATE).equals(TelephonyManager.EXTRA_STATE_OFFHOOK) -> {
+                    prevState = TelephonyManager.EXTRA_STATE_OFFHOOK
+                    Toast.makeText(ctx, "Трубку подняли: ${LocalDateTime.now()}", Toast.LENGTH_SHORT).show()
+                }
 
-                                    if (number.equals(CALLER_ID)) {
-                                        tm.javaClass.getMethod("answerRingingCall").invoke(tm)
-                                        Toast.makeText(p0, "Трубку подняли: ${LocalDateTime.now()}", Toast.LENGTH_SHORT).show()
-                                    }
-
-                                    prev_state = state
-                                }
-
-                                TelephonyManager.CALL_STATE_OFFHOOK -> {
-                                    prev_state = state
-
-                                    Toast.makeText(p0, "Звонок завершился: ${LocalDateTime.now()}", Toast.LENGTH_SHORT).show()
-                                }
-
-                                TelephonyManager.CALL_STATE_IDLE -> {
-                                    if (prev_state == TelephonyManager.CALL_STATE_OFFHOOK) {
-                                        prev_state = state
-                                        //CAll ended
-                                    }
-                                }
-                            }
-                        }
+                intent?.getStringExtra(TelephonyManager.EXTRA_STATE).equals(TelephonyManager.EXTRA_STATE_IDLE) -> {
+                    if (prevState != "") {
+                        Toast.makeText(ctx, "Звонок завершился: ${LocalDateTime.now()}", Toast.LENGTH_SHORT).show()
                     }
-                )
-            } else {
-                tm.listen(object : PhoneStateListener() {
-                    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-                        super.onCallStateChanged(state, phoneNumber)
-                    }
-                }, PhoneStateListener.LISTEN_CALL_STATE)
+                }
+
+                intent?.getStringExtra(TelephonyManager.EXTRA_STATE).equals(TelephonyManager.EXTRA_STATE_RINGING) -> {
+                    Toast.makeText(ctx, "Позвонили: ${LocalDateTime.now()}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
